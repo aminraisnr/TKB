@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # TKB/ui.py
 import os
 import sys
@@ -88,18 +89,19 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] {
 """
 
 class AnimBotTweenSliderWidget(QtWidgets.QWidget):
-    """Interactive Multi-Mode Tween Slider (-50% s.d. 150%)."""
+    """Interactive Multi-Mode Tween Slider yang diperluas mendukung Overshoot (-150% s.d. 150%)."""
     
-    def __init__(self, callback=None, cache_func=None, parent=None):
+    def __init__(self, callback=None, cache_func=None, on_release_func=None, parent=None):
         super(AnimBotTweenSliderWidget, self).__init__(parent)
         self.callback = callback
         self.cache_func = cache_func
+        self.on_release_func = on_release_func
         self.setFixedSize(160, 28)
         self.setMouseTracking(True)
         
-        self.min_val = -50.0
+        self.min_val = -150.0 
         self.max_val = 150.0
-        self.value = 50.0
+        self.value = 0.0 
         self.is_dragging = False
         self.cache = {}
         
@@ -161,9 +163,10 @@ class AnimBotTweenSliderWidget(QtWidgets.QWidget):
         painter.drawRect(QtCore.QRectF(track_right - 2, cy - 3, 5, 5))
 
         num_segments = 14
+        accent_indices = [0, 7, 14]
         for i in range(num_segments + 1):
             x = track_left + (i / float(num_segments)) * track_width
-            if i in [3, 7, 11]:
+            if i in accent_indices:
                 painter.setBrush(dash_color)
                 painter.drawRect(QtCore.QRectF(x - 2, cy - 1, 4, 2))
             else:
@@ -198,12 +201,14 @@ class AnimBotTweenSliderWidget(QtWidgets.QWidget):
         font.setPixelSize(9)
         font.setBold(True)
         painter.setFont(font)
-        painter.drawText(handle_rect, QtCore.Qt.AlignCenter, self.mode_label)
+        
+        display_text = "{:.0f}".format(self.value) if self.is_dragging else self.mode_label
+        painter.drawText(handle_rect, QtCore.Qt.AlignCenter, display_text)
 
     def mousePressEvent(self, event):
         if event.button() == QtCore.Qt.LeftButton:
             self.is_dragging = True
-            cmds.undoInfo(openChunk=True)
+            cmds.undoInfo(openChunk=True, chunkName="TKB_TweenMachine")
             
             if self.cache_func:
                 self.cache = self.cache_func() or {}
@@ -219,8 +224,12 @@ class AnimBotTweenSliderWidget(QtWidgets.QWidget):
     def mouseReleaseEvent(self, event):
         if event.button() == QtCore.Qt.LeftButton:
             self.is_dragging = False
+            
+            if self.on_release_func:
+                self.on_release_func()
+                
             cmds.undoInfo(closeChunk=True)
-            self.value = 50.0
+            self.value = 0.0 
             self.cache = {}
             
             label_map = {
@@ -312,7 +321,6 @@ class TKBToolbarWidget(QtWidgets.QWidget):
             "prev_frame": "performBlendToFrame",
             "next_frame": "performBlendToFrame"
         }
-        
         func_name = func_map.get(mode, "performBlendToNeighbors")
         if hasattr(mod, func_name):
             func = getattr(mod, func_name)
@@ -321,8 +329,12 @@ class TKBToolbarWidget(QtWidgets.QWidget):
                 kwargs["target_neighbor"] = "prev"
             elif mode == "next_frame":
                 kwargs["target_neighbor"] = "next"
-            
             func(**kwargs)
+
+    def _on_tween_slider_release(self):
+        current_objects = cmds.ls(sl=True)
+        if current_objects:
+            cmds.setKeyframe(current_objects, time=(cmds.currentTime(q=True),))
 
     def _run_core_script(self, folder_name, main_file=None, func_name=None, *args, **kwargs):
         def wrapper():
@@ -330,7 +342,7 @@ class TKBToolbarWidget(QtWidgets.QWidget):
                 folder_path = os.path.join(self.TKB_DIR, "core", folder_name).replace("\\", "/")
                 if folder_path not in sys.path:
                     sys.path.insert(0, folder_path)
-
+                
                 target_file = main_file
                 if not target_file:
                     if os.path.exists(os.path.join(folder_path, "tweenSlider.py")):
@@ -345,16 +357,15 @@ class TKBToolbarWidget(QtWidgets.QWidget):
 
                 file_path = os.path.join(folder_path, target_file).replace("\\", "/")
                 module_name = f"tkb_core_{folder_name.replace(' ', '_')}"
-                
                 spec = importlib.util.spec_from_file_location(module_name, file_path)
                 mod = importlib.util.module_from_spec(spec)
                 sys.modules[module_name] = mod
                 spec.loader.exec_module(mod)
-                
+
                 if func_name and hasattr(mod, func_name):
                     func = getattr(mod, func_name)
                     return func(*args, **kwargs)
-                
+
                 for f in ["run", "show", "main", "start", "performBlendToNeighbors"]:
                     if hasattr(mod, f):
                         return getattr(mod, f)(*args, **kwargs)
@@ -368,7 +379,6 @@ class TKBToolbarWidget(QtWidgets.QWidget):
             amount = float(val_text) if val_text else 1.0
         except ValueError:
             amount = 1.0
-
         nudge_amount = -amount if direction == "left" else amount
         self._run_core_script("nudge keys", main_file="nudge_keys.py", func_name="nudge_keys_by_amount", amount=nudge_amount)()
 
@@ -401,7 +411,6 @@ class TKBToolbarWidget(QtWidgets.QWidget):
         layout.addWidget(btn_left)
         layout.addWidget(self.nudge_input)
         layout.addWidget(btn_right)
-
         container.setFixedWidth(80)
         return container
 
@@ -410,7 +419,6 @@ class TKBToolbarWidget(QtWidgets.QWidget):
             oh_base_path = os.path.join(self.TKB_DIR, "core", "overlap").replace("\\", "/")
             py_ver = f"{sys.version_info[0]}{sys.version_info[1]}"
             oh_version_path = os.path.join(oh_base_path, py_ver).replace("\\", "/")
-            
             if not os.path.exists(oh_version_path):
                 available_folders = [f for f in os.listdir(oh_base_path) if os.path.isdir(os.path.join(oh_base_path, f))]
                 available_folders.sort(key=lambda x: [int(s) if s.isdigit() else s for s in re.split(r'(\d+)', x)], reverse=True)
@@ -418,9 +426,9 @@ class TKBToolbarWidget(QtWidgets.QWidget):
                     py_ver = available_folders[0]
                     oh_version_path = os.path.join(oh_base_path, py_ver).replace("\\", "/")
 
-            if oh_version_path not in sys.path: 
+            if oh_version_path not in sys.path:
                 sys.path.insert(0, oh_version_path)
-            if oh_base_path not in sys.path: 
+            if oh_base_path not in sys.path:
                 sys.path.insert(0, oh_base_path)
 
             for m in list(sys.modules.keys()):
@@ -441,59 +449,51 @@ class TKBToolbarWidget(QtWidgets.QWidget):
     def _create_align_btn(self):
         btn = QtWidgets.QToolButton()
         icon = self._get_icon("mix.png")
-        
         if not icon.isNull():
             btn.setIcon(icon)
             btn.setIconSize(QtCore.QSize(22, 22))
         else:
             btn.setText("ALIGN")
-            
         btn.setToolTip("ALIGN (Klik kiri/kanan untuk opsi)")
         btn.setFixedSize(28, 28)
         btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
-        
+
         menu = QtWidgets.QMenu(btn)
         menu.addAction("Align All (Current Frame)", self._run_core_script("align", func_name="align_to_last", translate=True, rotate=True, all_keys=False))
         menu.addAction("Align Position Only", self._run_core_script("align", func_name="align_to_last", translate=True, rotate=False, all_keys=False))
         menu.addAction("Align Rotation Only", self._run_core_script("align", func_name="align_to_last", translate=False, rotate=True, all_keys=False))
-        
         menu.addSeparator()
-        
         menu.addAction("⚡ Align All Keys (Multi-Frame)", self._run_core_script("align", func_name="align_to_last", translate=True, rotate=True, all_keys=True))
         menu.addAction("⚡ Align Position All Keys", self._run_core_script("align", func_name="align_to_last", translate=True, rotate=False, all_keys=True))
         menu.addAction("⚡ Align Rotation All Keys", self._run_core_script("align", func_name="align_to_last", translate=False, rotate=True, all_keys=True))
-        
+
         btn.setMenu(menu)
         btn.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         btn.customContextMenuRequested.connect(lambda pos, b=btn: menu.exec_(b.mapToGlobal(pos)))
-        
         return btn
 
     def _create_motion_trail_btn(self):
         btn = QtWidgets.QToolButton()
         icon = self._get_icon("motion_trail.png")
-        
         if not icon.isNull():
             btn.setIcon(icon)
             btn.setIconSize(QtCore.QSize(22, 22))
         else:
             btn.setText("MT")
-            
         btn.setToolTip("MOTION TRAIL")
         btn.setFixedSize(28, 28)
         btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         btn.clicked.connect(self._run_core_script("motion trail", func_name="create_motion_trail"))
-        
+
         menu = QtWidgets.QMenu(btn)
         menu.addAction("Create Motion Trail", self._run_core_script("motion trail", func_name="create_motion_trail"))
         menu.addAction("Remove Selected Trail", self._run_core_script("motion trail", func_name="remove_motion_trail"))
         menu.addSeparator()
         menu.addAction("Clear All Trails", self._run_core_script("motion trail", func_name="clear_all_trails"))
-        
+
         btn.setMenu(menu)
         btn.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         btn.customContextMenuRequested.connect(lambda pos, b=btn: menu.exec_(b.mapToGlobal(pos)))
-        
         return btn
 
     def _create_btn(self, icon_file, tooltip, func, text=""):
@@ -504,7 +504,6 @@ class TKBToolbarWidget(QtWidgets.QWidget):
             btn.setIconSize(QtCore.QSize(22, 22))
         else:
             btn.setText(text if text else tooltip[:3].upper())
-            
         btn.setToolTip(tooltip)
         btn.setFixedSize(28, 28)
         btn.clicked.connect(func)
@@ -526,20 +525,18 @@ class TKBToolbarWidget(QtWidgets.QWidget):
         main_layout.addWidget(self._create_btn("cam.png", "CAM>PERSP", self._run_core_script("cam to persp", func_name="cam_to_persp_self_test")))
         main_layout.addWidget(self._create_btn("charcam.png", "CHAR>CAM", self._run_core_script("char to cam", func_name="char_to_cam_dynamic_test")))
         main_layout.addWidget(self._create_btn("grid.png", "MAYA COMP GRIDS", self._run_core_script("grids", main_file="comp_grids_launcher.py", func_name="show"), text="CG"))
-
         main_layout.addWidget(self._create_separator())
 
         # --- GRUP 2: Transform & Utility ---
-        # TWEEN SLIDER HIGH PERFORMANCE
         self.tween_slider = AnimBotTweenSliderWidget(
             callback=self._on_tween_slider_drag,
-            cache_func=self._get_tween_cache
+            cache_func=self._get_tween_cache,
+            on_release_func=self._on_tween_slider_release
         )
         self.tween_slider.setToolTip("Tween Slider (Klik Kanan untuk Mengganti Mode)")
         main_layout.addWidget(self.tween_slider)
-        
-        # ALIGN DAN LAIN-LAIN
         main_layout.addWidget(self._create_align_btn())
+        main_layout.addWidget(self._create_motion_trail_btn())
         main_layout.addWidget(self._create_btn("reset.png", "RESET", self._run_core_script("reset", func_name="reset_selected")))
         main_layout.addWidget(self._create_btn("null.png", "NULL", self._run_core_script("null", func_name="create_null")))
         main_layout.addWidget(self._create_btn("step_snap.png", "SS", self._run_core_script("step snap", func_name="ss")))
@@ -547,7 +544,6 @@ class TKBToolbarWidget(QtWidgets.QWidget):
         main_layout.addWidget(self._create_btn("bacth.png", "anaknya dulu baru ibu", self._run_core_script("bacth parent", func_name="batch_parent_constraint_rigs")))
         main_layout.addWidget(self._create_btn("gpu.png", "GPU CACHE", self._run_core_script("gpu cache", func_name="create_gpu_cache")))
         main_layout.addWidget(self._create_nudge_widget())
-
         main_layout.addWidget(self._create_separator())
 
         # --- GRUP 3: Selection Sets ---
@@ -555,33 +551,26 @@ class TKBToolbarWidget(QtWidgets.QWidget):
         main_layout.addWidget(self._create_btn("hier.png", "CTRL SELECT", self._run_core_script("smart select", func_name="smart_select")))
         main_layout.addWidget(self._create_btn("Mata.png", "MATA SELECT", self._run_core_script("select eyes", func_name="eyeselect")))
         main_layout.addWidget(self._create_btn("Mulut.png", "MULUT SELECT", self._run_core_script("select mouth", func_name="mouthselect")))
-
         main_layout.addWidget(self._create_separator())
 
         # --- GRUP 4: Script & Engine ---
         main_layout.addWidget(self._create_btn("paie.png", "PAIE SYSTEM", self._run_core_script("copy anim")))
         main_layout.addWidget(self._create_btn("pose2shelf.png", "pose2shelf", self._run_core_script("pose2mel", func_name="pose2shelf_ui")))
         main_layout.addWidget(self._create_btn("OverlapHelperIcon.png", "OVERLAP HELPER", self._run_overlap_helper))
-        main_layout.addWidget(self._create_motion_trail_btn())
         main_layout.addWidget(self._create_btn("refresh.png", "REFRESH EVAL", self._run_core_script("refresh", func_name="refresh_evaluation_mode")))
 
 
 def build_tkb_ui(*args):
     global GLOBAL_TKB_WIDGET
-    
     wsc_ptr = omui.MQtUtil.findControl(WSC_ID)
     if not wsc_ptr:
         return
-        
     wsc_widget = wrapInstance(int(wsc_ptr), QtWidgets.QWidget)
-
     if wsc_widget.layout():
         old_layout = wsc_widget.layout()
         QtWidgets.QWidget().setLayout(old_layout)
-
     layout = QtWidgets.QVBoxLayout(wsc_widget)
     layout.setContentsMargins(0, 0, 0, 0)
-
     GLOBAL_TKB_WIDGET = TKBToolbarWidget(parent=wsc_widget)
     layout.addWidget(GLOBAL_TKB_WIDGET)
 
@@ -589,10 +578,6 @@ def build_tkb_ui(*args):
 def UI():
     if cmds.workspaceControl(WSC_ID, exists=True):
         cmds.deleteUI(WSC_ID)
-
-    # ---------------------------------------------------------
-    # LAUNCH WORKSPACE CONTROL
-    # ---------------------------------------------------------
     cmds.workspaceControl(
         WSC_ID,
         label="AMINNN TOOLS COY",
@@ -601,9 +586,13 @@ def UI():
         initialHeight=38,
         uiScript="import TKB.ui as tkb_ui; tkb_ui.build_tkb_ui()"
     )
-
     build_tkb_ui()
     cmds.workspaceControl(WSC_ID, e=True, restore=True)
 
+
 def show():
+    UI()
+
+# Tambahkan alias ini di paling bawah ui.py agar jika Maya mencari 'show_ui' tidak crash
+def show_ui():
     UI()
