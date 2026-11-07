@@ -2,7 +2,6 @@
 # TKB/ui.py
 import os
 import sys
-import re
 import importlib
 import importlib.util
 import maya.cmds as cmds
@@ -103,6 +102,7 @@ class AnimBotTweenSliderWidget(QtWidgets.QWidget):
         self.max_val = 150.0
         self.value = 0.0 
         self.is_dragging = False
+        self._undo_chunk_open = False
         self.cache = {}
         
         self.mode = "blend_neighbors"
@@ -207,40 +207,60 @@ class AnimBotTweenSliderWidget(QtWidgets.QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == QtCore.Qt.LeftButton:
-            self.is_dragging = True
-            cmds.undoInfo(openChunk=True, chunkName="TKB_TweenMachine")
-            
-            if self.cache_func:
-                self.cache = self.cache_func() or {}
+            try:
+                cmds.undoInfo(openChunk=True, chunkName="TKB_TweenMachine")
+                self._undo_chunk_open = True
+                self.is_dragging = True
 
-            pos_x = event.position().x() if hasattr(event, 'position') else event.x()
-            self._update_value_from_pos(pos_x)
+                if self.cache_func:
+                    self.cache = self.cache_func() or {}
+
+                pos_x = event.position().x() if hasattr(event, 'position') else event.x()
+                self._update_value_from_pos(pos_x)
+            except Exception as exc:
+                self._finish_drag()
+                cmds.warning("TKB: Tween slider gagal: {}".format(exc))
 
     def mouseMoveEvent(self, event):
         if self.is_dragging:
-            pos_x = event.position().x() if hasattr(event, 'position') else event.x()
-            self._update_value_from_pos(pos_x)
+            try:
+                pos_x = event.position().x() if hasattr(event, 'position') else event.x()
+                self._update_value_from_pos(pos_x)
+            except Exception as exc:
+                self._finish_drag()
+                cmds.warning("TKB: Tween slider gagal: {}".format(exc))
 
     def mouseReleaseEvent(self, event):
-        if event.button() == QtCore.Qt.LeftButton:
-            self.is_dragging = False
-            
-            if self.on_release_func:
-                self.on_release_func()
-                
-            cmds.undoInfo(closeChunk=True)
-            self.value = 0.0 
-            self.cache = {}
-            
-            label_map = {
-                "blend_neighbors": "TW",
-                "ease": "EB",
-                "default": "DF",
-                "prev_frame": "PRV",
-                "next_frame": "NXT"
-            }
-            self.mode_label = label_map.get(self.mode, "TW")
-            self.update()
+        if event.button() == QtCore.Qt.LeftButton and self.is_dragging:
+            try:
+                if self.on_release_func:
+                    self.on_release_func()
+            except Exception as exc:
+                cmds.warning("TKB: Tween slider gagal saat dilepas: {}".format(exc))
+            finally:
+                self._finish_drag()
+
+    def _finish_drag(self):
+        self.is_dragging = False
+        self.value = 0.0
+        self.cache = {}
+
+        label_map = {
+            "blend_neighbors": "TW",
+            "ease": "EB",
+            "default": "DF",
+            "prev_frame": "PRV",
+            "next_frame": "NXT"
+        }
+        self.mode_label = label_map.get(self.mode, "TW")
+
+        if self._undo_chunk_open:
+            self._undo_chunk_open = False
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception as exc:
+                cmds.warning("TKB: Gagal menutup undo chunk tween: {}".format(exc))
+        self.update()
 
     def _update_value_from_pos(self, x_pos):
         margin = 12
@@ -331,11 +351,6 @@ class TKBToolbarWidget(QtWidgets.QWidget):
                 kwargs["target_neighbor"] = "next"
             func(**kwargs)
 
-    def _on_tween_slider_release(self):
-        current_objects = cmds.ls(sl=True)
-        if current_objects:
-            cmds.setKeyframe(current_objects, time=(cmds.currentTime(q=True),))
-
     def _run_core_script(self, folder_name, main_file=None, func_name=None, *args, **kwargs):
         def wrapper():
             try:
@@ -419,12 +434,16 @@ class TKBToolbarWidget(QtWidgets.QWidget):
             oh_base_path = os.path.join(self.TKB_DIR, "core", "overlap").replace("\\", "/")
             py_ver = f"{sys.version_info[0]}{sys.version_info[1]}"
             oh_version_path = os.path.join(oh_base_path, py_ver).replace("\\", "/")
-            if not os.path.exists(oh_version_path):
-                available_folders = [f for f in os.listdir(oh_base_path) if os.path.isdir(os.path.join(oh_base_path, f))]
-                available_folders.sort(key=lambda x: [int(s) if s.isdigit() else s for s in re.split(r'(\d+)', x)], reverse=True)
-                if available_folders:
-                    py_ver = available_folders[0]
-                    oh_version_path = os.path.join(oh_base_path, py_ver).replace("\\", "/")
+            if not os.path.isdir(oh_version_path):
+                available_versions = [
+                    folder for folder in os.listdir(oh_base_path)
+                    if os.path.isdir(os.path.join(oh_base_path, folder))
+                ]
+                cmds.warning(
+                    "TKB: Overlap Helper tidak menyediakan Python {}. Versi tersedia: {}"
+                    .format(py_ver, ", ".join(sorted(available_versions)) or "tidak ada")
+                )
+                return
 
             if oh_version_path not in sys.path:
                 sys.path.insert(0, oh_version_path)
@@ -530,8 +549,7 @@ class TKBToolbarWidget(QtWidgets.QWidget):
         # --- GRUP 2: Transform & Utility ---
         self.tween_slider = AnimBotTweenSliderWidget(
             callback=self._on_tween_slider_drag,
-            cache_func=self._get_tween_cache,
-            on_release_func=self._on_tween_slider_release
+            cache_func=self._get_tween_cache
         )
         self.tween_slider.setToolTip("Tween Slider (Klik Kanan untuk Mengganti Mode)")
         main_layout.addWidget(self.tween_slider)

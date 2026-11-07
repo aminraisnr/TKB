@@ -4,6 +4,7 @@ Maya Launcher Script untuk Mintools (TKB)
 Salin kode di bawah ini ke Script Editor Python Maya kamu.
 """
 import sys
+import importlib
 import maya.cmds as cmds
 
 # Pastikan lokasi folder tempat kamu menaruh 'TKB' terdaftar di sistem internal Maya
@@ -12,16 +13,15 @@ import maya.cmds as cmds
 
 try:
     import TKB
-    from importlib import reload
+    import TKB.ui
     
-    # Lakukan reload paksa agar setiap perubahan kode di komputer langsung terbaca oleh Maya
-    reload(TKB.core.tweener)
-    reload(TKB.ui)
-    reload(TKB)
+    # Reload modul UI; modul tween dimuat oleh UI saat widget dibuat.
+    importlib.reload(TKB.ui)
+    importlib.reload(TKB)
     
     # Jalankan Window
     TKB.show_ui()
-    print("Mintools: Tween Machine berhasil dimuat.")
+    print("TKB berhasil dimuat.")
     
 except Exception as e:
     cmds.error("Gagal memuat Mintools: {}".format(str(e)))
