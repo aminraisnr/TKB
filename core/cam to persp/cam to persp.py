@@ -15,6 +15,7 @@ import traceback
     # =========================================================
 def cam_to_persp_self_test(*args):
     cam_ctrl = "rigging_viewtool_camera_df_hig_vr006:Cam_World_Ctrl"
+    cam_ctrl = "CineCameraActor:world_ctl"
     persp = "persp"
 
     if not cmds.objExists(cam_ctrl):

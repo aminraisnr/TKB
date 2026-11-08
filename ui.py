@@ -431,31 +431,30 @@ class TKBToolbarWidget(QtWidgets.QWidget):
 
     def _run_overlap_helper(self):
         try:
+            # Langsung mengarah ke folder core/overlap
             oh_base_path = os.path.join(self.TKB_DIR, "core", "overlap").replace("\\", "/")
-            py_ver = f"{sys.version_info[0]}{sys.version_info[1]}"
-            oh_version_path = os.path.join(oh_base_path, py_ver).replace("\\", "/")
-            if not os.path.isdir(oh_version_path):
-                available_versions = [
-                    folder for folder in os.listdir(oh_base_path)
-                    if os.path.isdir(os.path.join(oh_base_path, folder))
-                ]
-                cmds.warning(
-                    "TKB: Overlap Helper tidak menyediakan Python {}. Versi tersedia: {}"
-                    .format(py_ver, ", ".join(sorted(available_versions)) or "tidak ada")
-                )
-                return
 
-            if oh_version_path not in sys.path:
-                sys.path.insert(0, oh_version_path)
             if oh_base_path not in sys.path:
                 sys.path.insert(0, oh_base_path)
 
+            # Hapus cache modul uiFile lama agar selalu merefresh saat dipanggil
             for m in list(sys.modules.keys()):
                 if m == "uiFile" or m.startswith("uiFile."):
                     del sys.modules[m]
 
+            # Import modul uiFile dan tampilkan UI
             import uiFile
             importlib.reload(uiFile)
+
+            # Memanggil fungsi pemanggil UI
+            if hasattr(uiFile, "show_ui"):
+                uiFile.show_ui()
+            elif hasattr(uiFile, "ui"):
+                if hasattr(uiFile, "maya_main_window"):
+                    uiFile.ui(uiFile.maya_main_window())
+                else:
+                    uiFile.ui()
+
         except Exception as e:
             cmds.warning(f"TKB: Gagal menjalankan OverlapHelper -> {e}")
 

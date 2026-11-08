@@ -1,6 +1,3 @@
-# ==========================
-# GLOBAL IMPORTS (WAJIB)
-# ==========================
 import os
 import re
 import sys
@@ -9,16 +6,9 @@ import maya.cmds as mc    # (opsional) simpan ini jika ada fungsi yang pakai mc
 import maya.mel as mel
 import traceback
 
-    # =========================================================
-    # 10) char to cam
-    #    - select outliner
-    # =========================================================
-
 def char_to_cam_dynamic_test(*args):
-    # =========================
-    # CAMERA (GLOBAL)
-    # =========================
     CAM_CTRL = "rigging_viewtool_camera_df_hig_vr006:Cam_Main_ctrl"
+    CAM_CTRL = "CineCameraActor:world_ctl"
 
     if not cmds.objExists(CAM_CTRL):
         cmds.confirmDialog(
@@ -46,8 +36,12 @@ def char_to_cam_dynamic_test(*args):
         ns = leaf.split(":")[0]
 
         # FIND SUPER & PLACER (dynamic per character)
-        super_candidates = cmds.ls(ns + ":*Transform_Ctrl", type="transform") or []
-        placer_candidates = cmds.ls(ns + ":*Root_Ctrl", type="transform") or []
+        super_candidates = cmds.ls(ns + ":*MainExtra2", type="transform") or []
+        placer_candidates = (
+        cmds.ls(ns + ":*Root_Ctrl", type="transform") or 
+        cmds.ls(ns + ":*MainExtra1", type="transform") or 
+        []
+        )
 
         if not super_candidates or not placer_candidates:
             cmds.warning("Skip {} (super/placer ctrl tidak ditemukan)".format(ns))
