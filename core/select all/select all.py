@@ -1,12 +1,16 @@
+## -*- coding: utf-8 -*-
 # =========================================================
 # 1) SELECT ALL
 # =========================================================
+import maya.cmds as cmds
+
 
 def select_all_multi(include_no_shape_ctrl=True, only_selectable=True, exclude_groups=True):
     """
     Menyeleksi seluruh kontroler dari semua karakter yang bagian tubuhnya sedang dipilih.
     Mendukung banyak karakter sekaligus (Multi-Namespace).
     """
+    # ... sisa isi kode di bawahnya tetap sama ...
     # 1. Ambil seleksi awal
     initial_sel = cmds.ls(sl=True, long=True) or []
     
